@@ -657,11 +657,9 @@ components:
             to a contract.
         licenseKeySuffix:
           type: string
-          nullable: true
           description: >-
             Last 4 characters of LANGFUSE_EE_LICENSE_KEY, so a report can be
-            matched to a contract without exposing the key. Null when no license
-            key is set or the key is 8 characters or shorter.
+            matched to a contract without exposing the key.
         billableUnits:
           type: integer
           description: Sum of traces, observations and scores
