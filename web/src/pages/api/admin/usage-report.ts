@@ -5,6 +5,8 @@ import { logger } from "@langfuse/shared/src/server";
 import { VERSION } from "@/src/constants";
 import { env } from "@/src/env.mjs";
 import { AdminApiAuthService } from "@/src/ee/features/admin-api/server";
+import { hasEntitlementBasedOnPlan } from "@/src/features/entitlements/server";
+import { getSelfHostedInstancePlanServerSide } from "@/src/features/entitlements/server/getPlan";
 import {
   collectUsageCounts,
   type UsageCounts,
@@ -59,7 +61,9 @@ function licenseKeySuffix(): string | null {
  *
  * Returns the usage counts the telemetry job would send, for the creation
  * window [start, end). Lets deployments that set LANGFUSE_DISABLE_OUTBOUND
- * produce the usage report on demand. Reads only the local databases.
+ * produce the usage report on demand. Reads only the local databases. Like the
+ * organizations admin routes, it requires the admin-api entitlement (a
+ * self-hosted Enterprise license key).
  */
 export default async function handler(
   req: NextApiRequest,
@@ -74,6 +78,17 @@ export default async function handler(
     // Verify admin API authentication, only allow on self-hosted (not on Langfuse Cloud)
     if (!AdminApiAuthService.handleAdminAuth(req, res)) {
       return;
+    }
+
+    if (
+      !hasEntitlementBasedOnPlan({
+        plan: getSelfHostedInstancePlanServerSide(),
+        entitlement: "admin-api",
+      })
+    ) {
+      return res.status(403).json({
+        error: "This feature is not available on your current plan.",
+      });
     }
 
     const query = UsageReportQuerySchema.safeParse(req.query);

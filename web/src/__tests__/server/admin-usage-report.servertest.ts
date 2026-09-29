@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createMocks } from "node-mocks-http";
 import type { UsageCounts } from "@/src/features/telemetry/usageCounts";
+import type * as GetPlanModule from "@/src/features/entitlements/server/getPlan";
 
 /**
  * GET /api/admin/usage-report. collectUsageCounts() (covered by
@@ -11,10 +12,16 @@ import type { UsageCounts } from "@/src/features/telemetry/usageCounts";
  * ClickHouse, see telemetry.servertest.ts).
  */
 
-const { envMock, collectUsageCountsMock, findUniqueMock } = vi.hoisted(() => ({
+const {
+  envMock,
+  collectUsageCountsMock,
+  findUniqueMock,
+  getSelfHostedInstancePlanMock,
+} = vi.hoisted(() => ({
   envMock: {} as Record<string, unknown>,
   collectUsageCountsMock: vi.fn(),
   findUniqueMock: vi.fn(),
+  getSelfHostedInstancePlanMock: vi.fn(),
 }));
 
 vi.mock("@/src/env.mjs", async (importOriginal) => {
@@ -27,6 +34,20 @@ vi.mock("@/src/features/telemetry/usageCounts", () => ({
   collectUsageCounts: collectUsageCountsMock,
 }));
 
+// Spied, not stubbed: each case resets it to the real implementation, which
+// reads LANGFUSE_EE_LICENSE_KEY from the mocked env above, so the license key
+// stub decides the plan unless a case overrides it.
+vi.mock(
+  "@/src/features/entitlements/server/getPlan",
+  async (importOriginal) => {
+    const actual = (await importOriginal()) as Record<string, unknown>;
+    return {
+      ...actual,
+      getSelfHostedInstancePlanServerSide: getSelfHostedInstancePlanMock,
+    };
+  },
+);
+
 vi.mock("@langfuse/shared/src/db", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, prisma: { cronJobs: { findUnique: findUniqueMock } } };
@@ -34,6 +55,11 @@ vi.mock("@langfuse/shared/src/db", async (importOriginal) => {
 
 import handler from "@/src/pages/api/admin/usage-report";
 import { VERSION } from "@/src/constants";
+
+const { getSelfHostedInstancePlanServerSide: realGetSelfHostedInstancePlan } =
+  await vi.importActual<typeof GetPlanModule>(
+    "@/src/features/entitlements/server/getPlan",
+  );
 
 const ADMIN_API_KEY = "test-admin-api-key";
 const LICENSE_KEY = "langfuse_ee_0123456789abcdefWXYZ";
@@ -79,6 +105,9 @@ describe("GET /api/admin/usage-report", () => {
     envMock.LANGFUSE_DISABLE_OUTBOUND = undefined;
     collectUsageCountsMock.mockReset().mockResolvedValue(COUNTS);
     findUniqueMock.mockReset().mockResolvedValue({ state: CLIENT_ID });
+    getSelfHostedInstancePlanMock
+      .mockReset()
+      .mockImplementation(realGetSelfHostedInstancePlan);
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
 
@@ -112,6 +141,44 @@ describe("GET /api/admin/usage-report", () => {
       const { status } = await callHandler({ method: "POST" });
       expect(status).toBe(405);
       expect(collectUsageCountsMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("admin-api entitlement", () => {
+    const PLAN_ERROR = {
+      error: "This feature is not available on your current plan.",
+    };
+
+    it.each([
+      ["no license key is set", undefined],
+      ["the key is not a Langfuse license key", "not-a-license-key"],
+      ["the key is a self-hosted Pro key", "langfuse_pro_0123456789abcdef"],
+    ])(
+      "returns 403 when %s (the instance plan lacks admin-api)",
+      async (_label, licenseKey) => {
+        envMock.LANGFUSE_EE_LICENSE_KEY = licenseKey;
+        const { status, body } = await callHandler();
+        expect(status).toBe(403);
+        expect(body).toEqual(PLAN_ERROR);
+        expect(collectUsageCountsMock).not.toHaveBeenCalled();
+        expect(findUniqueMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it("checks the entitlement after admin auth, so a bad key still gets 401", async () => {
+      envMock.LANGFUSE_EE_LICENSE_KEY = undefined;
+      const { status } = await callHandler({
+        authorization: "Bearer not-the-admin-key",
+      });
+      expect(status).toBe(401);
+    });
+
+    it("returns 200 with a self-hosted Enterprise key", async () => {
+      const { status } = await callHandler();
+      expect(getSelfHostedInstancePlanMock).toHaveReturnedWith(
+        "self-hosted:enterprise",
+      );
+      expect(status).toBe(200);
     });
   });
 
@@ -218,7 +285,11 @@ describe("GET /api/admin/usage-report", () => {
       expect(body.licenseKeySuffix).toBe("WXYZ");
     });
 
+    // The admin-api gate derives the plan from the same key, so an unset or
+    // short key never reaches the report in production; these two cases pin
+    // the plan to Enterprise to keep covering licenseKeySuffix()'s guard.
     it("returns licenseKeySuffix null when no license key is set", async () => {
+      getSelfHostedInstancePlanMock.mockReturnValue("self-hosted:enterprise");
       envMock.LANGFUSE_EE_LICENSE_KEY = undefined;
       const { status, body } = await callHandler();
       expect(status).toBe(200);
@@ -226,6 +297,7 @@ describe("GET /api/admin/usage-report", () => {
     });
 
     it("does not expose a license key too short to have a meaningful suffix", async () => {
+      getSelfHostedInstancePlanMock.mockReturnValue("self-hosted:enterprise");
       envMock.LANGFUSE_EE_LICENSE_KEY = "short";
       const { body } = await callHandler();
       expect(body.licenseKeySuffix).toBeNull();
