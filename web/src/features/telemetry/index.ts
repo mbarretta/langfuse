@@ -2,14 +2,10 @@ import { VERSION } from "@/src/constants";
 import { ServerPosthog } from "@/src/features/posthog-analytics/ServerPosthog";
 import { Prisma, prisma } from "@langfuse/shared/src/db";
 import { v4 as uuidv4 } from "uuid";
-import {
-  getDatasetRunItemCountsByProjectInCreationInterval,
-  getObservationCountsByProjectInCreationInterval,
-  getScoreCountsByProjectInCreationInterval,
-  getTraceCountsByProjectInCreationInterval,
-  logger,
-} from "@langfuse/shared/src/server";
+import { logger } from "@langfuse/shared/src/server";
 import { env } from "@/src/env.mjs";
+import { isOutboundDisabled } from "@/src/features/outbound/isOutboundDisabled";
+import { collectUsageCounts } from "@/src/features/telemetry/usageCounts";
 
 // Interval between jobs in minutes
 const JOB_INTERVAL_MINUTES = Prisma.raw("720"); // 12 hours
@@ -23,6 +19,9 @@ export async function telemetry() {
     if (process.env.NODE_ENV !== "production") return;
     // Do not run in Langfuse cloud, separate telemetry is used
     if (env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION !== undefined) return;
+    // Enterprise air-gapped deployments: LANGFUSE_DISABLE_OUTBOUND disables
+    // telemetry, including the EE exception below
+    if (isOutboundDisabled()) return;
     // Check if telemetry is not disabled, except for EE
     if (
       env.TELEMETRY_ENABLED === "false" &&
@@ -157,131 +156,33 @@ async function posthogTelemetry({
 }) {
   try {
     const posthog = new ServerPosthog();
-    // Count projects
-    const totalProjects = await prisma.project.count({
-      where: {
-        deletedAt: null,
-      },
+    const counts = await collectUsageCounts({
+      start: startTimeframe,
+      end: endTimeframe,
     });
-
-    // Count traces
-    const countTracesClickhouse =
-      await getTraceCountsByProjectInCreationInterval({
-        start: startTimeframe ?? new Date(0),
-        end: endTimeframe,
-      });
-    const countTraces = countTracesClickhouse.reduce(
-      (acc, curr) => acc + curr.count,
-      0,
-    );
-
-    // Count scores
-    const countScoresClickhouse =
-      await getScoreCountsByProjectInCreationInterval({
-        start: startTimeframe ?? new Date(0),
-        end: endTimeframe,
-      });
-    const countScores = countScoresClickhouse.reduce(
-      (acc, curr) => acc + curr.count,
-      0,
-    );
-
-    // Count observations
-    const countObservationsClickhouse =
-      await getObservationCountsByProjectInCreationInterval({
-        start: startTimeframe ?? new Date(0),
-        end: endTimeframe,
-      });
-    const countObservations = countObservationsClickhouse.reduce(
-      (acc, curr) => acc + curr.count,
-      0,
-    );
-
-    // Count datasets
-    const countDatasets = await prisma.dataset.count({
-      where: {
-        createdAt: {
-          gte: startTimeframe?.toISOString(),
-          lt: endTimeframe.toISOString(),
-        },
-      },
-    });
-
-    // Count dataset items
-    const countDatasetItems = await prisma.datasetItem.count({
-      where: {
-        createdAt: {
-          gte: startTimeframe?.toISOString(),
-          lt: endTimeframe.toISOString(),
-        },
-      },
-    });
-
-    // Count dataset runs
-    const countDatasetRuns = await prisma.datasetRuns.count({
-      where: {
-        createdAt: {
-          gte: startTimeframe?.toISOString(),
-          lt: endTimeframe.toISOString(),
-        },
-      },
-    });
-
-    const countDatasetRunItemsClickhouse =
-      await getDatasetRunItemCountsByProjectInCreationInterval({
-        start: startTimeframe ?? new Date(0),
-        end: endTimeframe,
-      });
-    const countDatasetRunItems = countDatasetRunItemsClickhouse.reduce(
-      (acc, curr) => acc + curr.count,
-      0,
-    );
-
-    // Count Langfuse Assistant runs. Counted unconditionally: zero on an
-    // instance that never enabled the Assistant is itself the answer.
-    const countAssistantRuns = await prisma.inAppAgentRun.count({
-      where: {
-        createdAt: {
-          gte: startTimeframe?.toISOString(),
-          lt: endTimeframe.toISOString(),
-        },
-      },
-    });
-
-    // Domains (no PII)
-    const domains = await prisma.$queryRaw<Array<{ domain: string }>>`
-      SELECT
-        substring(email FROM position('@' in email) + 1) as domain,
-        count(id)::int as "userCount"
-      FROM users
-      WHERE email ILIKE '%@%'
-      GROUP BY 1
-      ORDER BY count(id) desc
-      LIMIT 30
-    `;
 
     posthog.capture({
       distinctId: "docker:" + clientId,
       event: "telemetry",
       properties: {
         langfuseVersion: VERSION,
-        userDomains: domains,
-        totalProjects: totalProjects,
-        traces: countTraces,
-        scores: countScores,
-        observations: countObservations,
-        datasets: countDatasets,
-        datasetItems: countDatasetItems,
-        datasetRuns: countDatasetRuns,
-        datasetRunItems: countDatasetRunItems,
-        assistantRuns: countAssistantRuns,
+        userDomains: counts.userDomains,
+        totalProjects: counts.totalProjects,
+        traces: counts.traces,
+        scores: counts.scores,
+        observations: counts.observations,
+        datasets: counts.datasets,
+        datasetItems: counts.datasetItems,
+        datasetRuns: counts.datasetRuns,
+        datasetRunItems: counts.datasetRunItems,
+        assistantRuns: counts.assistantRuns,
         startTimeframe: startTimeframe?.toISOString(),
         endTimeframe: endTimeframe.toISOString(),
         eeLicenseKey: env.LANGFUSE_EE_LICENSE_KEY,
         langfuseCloudRegion: env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION,
         $set: {
           environment: process.env.NODE_ENV,
-          userDomains: domains,
+          userDomains: counts.userDomains,
           docker: true,
           langfuseVersion: VERSION,
         },

@@ -138,6 +138,8 @@ export const env = createEnv({
       .default("false"),
     // Telemetry
     TELEMETRY_ENABLED: z.enum(["true", "false"]).optional(),
+    // Enterprise self-hosted only: "true" disables telemetry, server PostHog and the update check.
+    LANGFUSE_DISABLE_OUTBOUND: z.enum(["true", "false"]).optional(),
     // Mulesoft SFDC sync (Langfuse Cloud only). All must be set for the
     // SfdcService factory to return a non-null instance; otherwise the
     // integration is a no-op.
@@ -816,6 +818,7 @@ export const env = createEnv({
     SALT: process.env.SALT,
     LANGFUSE_CSP_ENFORCE_HTTPS: process.env.LANGFUSE_CSP_ENFORCE_HTTPS,
     TELEMETRY_ENABLED: process.env.TELEMETRY_ENABLED,
+    LANGFUSE_DISABLE_OUTBOUND: process.env.LANGFUSE_DISABLE_OUTBOUND,
     // Default org, project and role
     LANGFUSE_DEFAULT_ORG_ID: process.env.LANGFUSE_DEFAULT_ORG_ID,
     LANGFUSE_DEFAULT_ORG_ROLE: process.env.LANGFUSE_DEFAULT_ORG_ROLE,
