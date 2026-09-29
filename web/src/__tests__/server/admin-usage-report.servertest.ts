@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createMocks } from "node-mocks-http";
+import type { UsageCounts } from "@/src/features/telemetry/usageCounts";
 
 /**
  * GET /api/admin/usage-report. collectUsageCounts() (covered by
@@ -48,7 +49,7 @@ const COUNTS = {
   datasetRunItems: 7,
   assistantRuns: 4,
   userDomains: [{ domain: "example.com", userCount: 3 }],
-};
+} satisfies UsageCounts;
 
 const callHandler = async ({
   method = "GET",

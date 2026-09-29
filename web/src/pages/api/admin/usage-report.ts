@@ -5,9 +5,27 @@ import { logger } from "@langfuse/shared/src/server";
 import { VERSION } from "@/src/constants";
 import { env } from "@/src/env.mjs";
 import { AdminApiAuthService } from "@/src/ee/features/admin-api/server";
-import { collectUsageCounts } from "@/src/features/telemetry/usageCounts";
+import {
+  collectUsageCounts,
+  type UsageCounts,
+} from "@/src/features/telemetry/usageCounts";
 
 const DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+/**
+ * The 200 response body. Counts are mapped by hand, like the telemetry payload
+ * in features/telemetry/index.ts, instead of spreading UsageCounts: a count
+ * added to UsageCounts fails the type check here until it is mapped, which is
+ * the prompt to add it to the UsageReport schema in the Fern spec too.
+ */
+type UsageReport = {
+  window: { start: string; end: string };
+  generatedAt: string;
+  langfuseVersion: string;
+  clientId: string | null;
+  licenseKeySuffix: string | null;
+  billableUnits: number;
+} & UsageCounts;
 
 const UsageReportQuerySchema = z
   .object({
@@ -76,15 +94,25 @@ export default async function handler(
       }),
     ]);
 
-    res.status(200).json({
+    const report: UsageReport = {
       window: { start: start.toISOString(), end: end.toISOString() },
       generatedAt: new Date().toISOString(),
       langfuseVersion: VERSION,
       clientId: telemetryJob?.state ?? null,
       licenseKeySuffix: licenseKeySuffix(),
       billableUnits: counts.traces + counts.observations + counts.scores,
-      ...counts,
-    });
+      totalProjects: counts.totalProjects,
+      traces: counts.traces,
+      scores: counts.scores,
+      observations: counts.observations,
+      datasets: counts.datasets,
+      datasetItems: counts.datasetItems,
+      datasetRuns: counts.datasetRuns,
+      datasetRunItems: counts.datasetRunItems,
+      assistantRuns: counts.assistantRuns,
+      userDomains: counts.userDomains,
+    };
+    res.status(200).json(report);
   } catch (e) {
     logger.error("Failed to generate usage report", e);
     res.status(500).json({ error: "Internal server error" });
