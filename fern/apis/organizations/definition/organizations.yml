@@ -218,7 +218,7 @@ types:
         docs: Version of the Langfuse deployment that generated the report
       clientId:
         type: nullable<string>
-        docs: Identifier of this deployment as used by the usage telemetry job, or null if the telemetry job has never run
+        docs: Identifier of this deployment as used by the usage telemetry job, or null if the telemetry job has never run. LANGFUSE_DISABLE_OUTBOUND stops the telemetry job, so clientId is null on deployments that have always run with the flag set and is only present if telemetry ran before the flag was set. Use licenseKeySuffix to match a report to a contract.
       licenseKeySuffix:
         type: nullable<string>
         docs: Last 4 characters of LANGFUSE_EE_LICENSE_KEY, so a report can be matched to a contract without exposing the key. Null when no license key is set or the key is 8 characters or shorter.
