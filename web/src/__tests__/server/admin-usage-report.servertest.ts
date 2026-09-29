@@ -285,23 +285,15 @@ describe("GET /api/admin/usage-report", () => {
       expect(body.licenseKeySuffix).toBe("WXYZ");
     });
 
-    // The admin-api gate derives the plan from the same key, so an unset or
-    // short key never reaches the report in production; these two cases pin
-    // the plan to Enterprise to keep covering licenseKeySuffix()'s guard.
-    it("returns licenseKeySuffix null when no license key is set", async () => {
+    // The admin-api gate derives the plan from the same key, so an unset key
+    // never reaches the report in production; pinning the plan to Enterprise
+    // covers licenseKeySuffix()'s guard for that impossible case.
+    it("returns 500 if the entitlement check passes without a license key", async () => {
       getSelfHostedInstancePlanMock.mockReturnValue("self-hosted:enterprise");
       envMock.LANGFUSE_EE_LICENSE_KEY = undefined;
       const { status, body } = await callHandler();
-      expect(status).toBe(200);
-      expect(body.licenseKeySuffix).toBeNull();
-    });
-
-    it("does not expose a license key too short to have a meaningful suffix", async () => {
-      getSelfHostedInstancePlanMock.mockReturnValue("self-hosted:enterprise");
-      envMock.LANGFUSE_EE_LICENSE_KEY = "short";
-      const { body } = await callHandler();
-      expect(body.licenseKeySuffix).toBeNull();
-      expect(JSON.stringify(body)).not.toContain("short");
+      expect(status).toBe(500);
+      expect(body).toEqual({ error: "Internal server error" });
     });
 
     it.each([

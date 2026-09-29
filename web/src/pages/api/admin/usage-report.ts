@@ -25,7 +25,7 @@ type UsageReport = {
   generatedAt: string;
   langfuseVersion: string;
   clientId: string | null;
-  licenseKeySuffix: string | null;
+  licenseKeySuffix: string;
   billableUnits: number;
 } & UsageCounts;
 
@@ -47,12 +47,17 @@ const UsageReportQuerySchema = z
 
 /**
  * Last 4 characters of the license key, so a report can be matched to a
- * contract without exposing the key. Null when no key is set or the key is too
- * short for a suffix to be meaningfully shorter than the key itself.
+ * contract without exposing the key. Call only after the admin-api entitlement
+ * check: it passes only with a self-hosted Enterprise (langfuse_ee_) key, so a
+ * missing key here is a bug, and throwing turns it into the handler's 500.
  */
-function licenseKeySuffix(): string | null {
+function licenseKeySuffix(): string {
   const key = env.LANGFUSE_EE_LICENSE_KEY;
-  if (!key || key.length <= 8) return null;
+  if (!key) {
+    throw new Error(
+      "LANGFUSE_EE_LICENSE_KEY is unset although the admin-api entitlement check passed",
+    );
+  }
   return key.slice(-4);
 }
 
