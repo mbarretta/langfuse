@@ -1,4 +1,5 @@
 import { env } from "@/src/env.mjs";
+import { isOutboundDisabled } from "@/src/features/outbound/isOutboundDisabled";
 import { isProductAnalyticsAvailable } from "@/src/features/posthog-analytics/productAnalyticsAvailability";
 import { PostHog } from "posthog-node";
 
@@ -10,6 +11,13 @@ export class ServerPosthog {
   private optOut: Promise<void> | undefined;
 
   constructor() {
+    // Air-gapped deployments: never construct a client, so no capture call
+    // site (current or future) can reach PostHog.
+    if (isOutboundDisabled()) {
+      this.posthog = null;
+      return;
+    }
+
     const telemetryEnabled = env.TELEMETRY_ENABLED !== "false";
 
     const apiKey =
