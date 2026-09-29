@@ -1,5 +1,6 @@
 import { VERSION } from "@/src/constants/VERSION";
 import { env } from "@/src/env.mjs";
+import { isOutboundDisabled } from "@/src/features/outbound/isOutboundDisabled";
 import {
   createTRPCRouter,
   protectedProjectProcedure,
@@ -33,6 +34,8 @@ export const publicRouter = createTRPCRouter({
   checkUpdate: publicProcedure.query(async () => {
     // Skip update check on Langfuse Cloud
     if (env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION) return null;
+    // Skip update check when outbound calls are disabled (air-gapped EE)
+    if (isOutboundDisabled()) return null;
 
     let body;
     try {
