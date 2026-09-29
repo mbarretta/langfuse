@@ -122,6 +122,29 @@ service:
         - commons.UnauthorizedError
         - commons.MethodNotAllowedError
 
+    # Usage report
+    getUsageReport:
+      docs: |
+        Get the usage counts that the usage telemetry job reports, for the creation window [start, end).
+        Reads only this deployment's own databases and makes no outbound network call, so deployments that set `LANGFUSE_DISABLE_OUTBOUND` can produce the usage report on demand.
+        Returns 400 when a parameter is not an ISO 8601 datetime or when start is not before end.
+      method: GET
+      path: /usage-report
+      request:
+        name: GetUsageReportRequest
+        query-parameters:
+          start:
+            type: optional<datetime>
+            docs: Inclusive start of the creation window (ISO 8601 datetime, a UTC offset is allowed). Defaults to 30 days before end.
+          end:
+            type: optional<datetime>
+            docs: Exclusive end of the creation window (ISO 8601 datetime, a UTC offset is allowed). Defaults to the time of the request.
+      response: UsageReport
+      errors:
+        - commons.Error
+        - commons.UnauthorizedError
+        - commons.MethodNotAllowedError
+
 types:
   Organizations:
     docs: List of organizations
@@ -180,3 +203,71 @@ types:
       secretKey: string
       displaySecretKey: string
       note: optional<string>
+
+  UsageReport:
+    docs: Instance-wide usage counts for a creation window
+    properties:
+      window:
+        type: UsageReportWindow
+        docs: The creation window [start, end) that the interval counts cover
+      generatedAt:
+        type: datetime
+        docs: When the report was generated
+      langfuseVersion:
+        type: string
+        docs: Version of the Langfuse deployment that generated the report
+      clientId:
+        type: nullable<string>
+        docs: Identifier of this deployment as used by the usage telemetry job, or null if the telemetry job has never run
+      licenseKeySuffix:
+        type: nullable<string>
+        docs: Last 4 characters of LANGFUSE_EE_LICENSE_KEY, so a report can be matched to a contract without exposing the key. Null when no license key is set or the key is 8 characters or shorter.
+      billableUnits:
+        type: integer
+        docs: Sum of traces, observations and scores
+      totalProjects:
+        type: integer
+        docs: Current number of projects that are not deleted. This is a current total, not a count for the window.
+      traces:
+        type: integer
+        docs: Traces created in the window
+      scores:
+        type: integer
+        docs: Scores created in the window
+      observations:
+        type: integer
+        docs: Observations created in the window
+      datasets:
+        type: integer
+        docs: Datasets created in the window
+      datasetItems:
+        type: integer
+        docs: Dataset items created in the window
+      datasetRuns:
+        type: integer
+        docs: Dataset runs created in the window
+      datasetRunItems:
+        type: integer
+        docs: Dataset run items created in the window
+      assistantRuns:
+        type: integer
+        docs: Assistant runs created in the window
+      userDomains:
+        type: list<UsageReportUserDomain>
+        docs: The 30 email domains with the most users and their user counts, most users first. Like totalProjects, this is a current total, not a count for the window.
+
+  UsageReportWindow:
+    docs: Creation window of a usage report
+    properties:
+      start:
+        type: datetime
+        docs: Inclusive start of the window
+      end:
+        type: datetime
+        docs: Exclusive end of the window
+
+  UsageReportUserDomain:
+    docs: Number of users with an email address at a domain
+    properties:
+      domain: string
+      userCount: integer
